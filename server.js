@@ -217,11 +217,9 @@ const { Resend } = require("resend");
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ===================== HTML 태그 제거 =====================
-function stripHtml(html) {
-  return html.replace(/<[^>]*>?/gm, "");
-}
-
-// ===================== 뉴스 필터 블랙리스트 =====================
+// ===================== HTML 태그 제거 =====================
+function stripHtml(html) { return html.replace(/<[^>]*>?/gm, ""); }
+// ===================== 뉴스 검색 =====================
 const blacklist = [
   "연예","스타","방송","범죄","사건","사고","폭력","살인","강도","흉기",
   "스포츠","축구","야구","농구","사망","약물","불륜",
@@ -230,6 +228,48 @@ const blacklist = [
   "마약","불법","성관계","협박","폭행","학대","가스라이팅","스토킹","살해","자살","보이스피싱",
   "시댁","시동생","시부모"
 ];
+
+async function fetchNews(keyword) {
+  if (!keyword) return [];
+  try {
+    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(keyword)}&hl=ko&gl=KR&ceid=KR:ko`;
+    const r = await fetch(url);
+    const xml = await r.text();
+    const parser = new XMLParser({ ignoreAttributes: false });
+    const json = parser.parse(xml);
+    let items = json?.rss?.channel?.item || [];
+    const today = new Date();
+    const sevenDaysAgo = new Date(today); sevenDaysAgo.setDate(today.getDate() - 7);
+
+    items = (Array.isArray(items) ? items : [items])
+      .map(item => ({
+        title: item.title || "",
+        link: item.link || "",
+        pubDate: item.pubDate || "",
+        source: item.source?.["#text"] || "",
+        description: stripHtml(item.description || "")
+      }))
+      .filter(a => { 
+        const d = new Date(a.pubDate);
+        return !isNaN(d.getTime()) && d >= sevenDaysAgo;
+      });
+
+    const tfidf = new TfIdf();
+    items.forEach(a => tfidf.addDocument(a.title + " " + a.description));
+
+    items = items.map((a, idx) => {
+      let score = 0;
+      keyword.split(" ").forEach(tok => score += tfidf.tfidf(tok, idx));
+      if (!score || isNaN(score)) score = 0.0001;
+      const titleText = a.title.toLowerCase(), descText = a.description.toLowerCase();
+      blacklist.forEach(w => { if(titleText.includes(w.toLowerCase()) || descText.includes(w.toLowerCase())) score *= 0.2; });
+      return { ...a, score };
+    });
+
+    items.sort((a,b) => b.score - a.score);
+    return items.slice(0,3);
+  } catch(e) { console.error(e); return []; }
+}
 
 // ===================== 이메일 발송 함수 =====================
 async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) {
