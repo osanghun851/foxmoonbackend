@@ -60,7 +60,7 @@ app.use(session({
     secure: true, 
   },
 }));
-
+app.set('trust proxy', 1);
 // 라우터 연결
 app.use("/api", purchaseRouter);
 app.use("/api/user", userRouter);
