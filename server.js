@@ -39,7 +39,7 @@ mongoose.connect(process.env.MONGO_URI, {
 // 미들웨어
 app.use(cors({
   origin: [
-    "http://localhost:5500",
+    
     "https://foxmoon.vercel.app"
   ],
   credentials: true
