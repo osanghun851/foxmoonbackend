@@ -472,7 +472,91 @@ async function refreshGlobalData() {
 refreshGlobalData();
 
 
+cron.schedule("0 3 * * *", refreshGlobalData);
+  function selectLeaseFromGlobal(globalLh, region, district) {
+    // region == provinceName (e.g., "서울특별시"), district may be empty
+    let list = globalLh.filter(x => x.provinceName === region);
+    if (district) {
+    list = list.filter(x => (x.regionName || "").includes(district));
+    }
+    return list;
+    }
+    
+    
+    function selectWorknetFromGlobal(globalWk, workEdu, workCo) {
+    // If workEdu given, include '99'(무관) as well
+    const eduSet = new Set();
+    if (workEdu) { eduSet.add(workEdu); eduSet.add("99"); }
+    const coSet = new Set();
+    if (workCo) {
+    if (workCo === "10|40") { coSet.add("10"); coSet.add("40"); }
+    else { coSet.add(workCo); }
+    }
+    return globalWk.filter(x => {
+    const eduOk = eduSet.size === 0 || eduSet.has(x.empWantedEduCd);
+    const coOk = coSet.size === 0 || coSet.has(String(x.coClcd));
+    return eduOk && coOk;
+    });
+    }
+    cron.schedule("0 5 * * *", async () => {
+      console.log("⏰ [05:00] UserDataCache refresh start");
+      try {
+        const global = await GlobalData.findOne();
+        if (!global) { 
+          console.warn("⚠️ No GlobalData; skipping"); 
+          return; 
+        }
+    
+        const settings = await UserSetting.find({});
+    
+        for (const s of settings) {
+          const userId = s.userId;
+          if (!userId) continue;
+    
+          // 유저 조건에 맞는 데이터 추출
+          const leaseItems = s.home ? selectLeaseFromGlobal(global.lh, s.region) : [];
+          const newsItems  = (s.news && s.newskeyword) ? await fetchNews(s.newskeyword) : [];
+          const workItems  = s.work ? selectWorknetFromGlobal(global.worknet, s.workEdu, s.workCo) : [];
+    
+          // 캐시 갱신
+          await UserDataCache.deleteOne({ userId });
+          await new UserDataCache({ userId, leaseItems, newsItems, workItems, updatedAt: new Date() }).save();
+    
+          console.log(`💾 Cache updated → userId: ${userId}`);
+        }
+    
+        console.log("✅ UserDataCache refresh done");
+      } catch (err) {
+        console.error("❌ UserDataCache refresh failed:", err);
+      }
+    });
+    
+    cron.schedule("0 6 * * *", async () => {
+      console.log("⏰ [06:00] Email send start");
+      try {
+        const settings = await UserSetting.find({}).populate("userId", "email username");
+    
+        for (const s of settings) {
+          const userId = s.userId?._id;
+          if (!userId) continue;
+    
+          // 캐시에서 데이터 가져오기
+          const cache = await UserDataCache.findOne({ userId });
+          if (!cache) continue;
+    
+          // 이메일 발송
+          await sendEmail({ ...s.toObject(), ...s.userId.toObject() }, cache.leaseItems, cache.newsItems, cache.workItems);
+          console.log(`📧 Sent → ${s.userId.email}`);
+        }
+    
+        console.log("✅ Email send done");
+      } catch (err) {
+        console.error("❌ Email send failed:", err);
+      }
+    });
+// ---------------- 서버 실행 ----------------
 
+// --- 서버 실행 ---
 app.listen(PORT, () => {
   console.log(`✅ 서버 실행중: http://localhost:${PORT}`);
 });
