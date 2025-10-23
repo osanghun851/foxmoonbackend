@@ -213,13 +213,16 @@ app.get("/api/user-data", async (req, res) => {
   }
 });
 // ===================== 이메일 발송 (Resend API, CommonJS) =====================
-const { Resend } = require("resend");
+const Resend = require("resend").Resend;
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// ===================== HTML 태그 제거 =====================
-// ===================== HTML 태그 제거 =====================
+// Render IPv6 환경에서 fetch 오류 방지
+global.fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
+// HTML 태그 제거
 function stripHtml(html) { return html.replace(/<[^>]*>?/gm, ""); }
-// ===================== 뉴스 검색 =====================
+
+// 블랙리스트 (뉴스 필터)
 const blacklist = [
   "연예","스타","방송","범죄","사건","사고","폭력","살인","강도","흉기",
   "스포츠","축구","야구","농구","사망","약물","불륜",
@@ -229,12 +232,14 @@ const blacklist = [
   "시댁","시동생","시부모"
 ];
 
+// 뉴스 가져오기
 async function fetchNews(keyword) {
   if (!keyword) return [];
   try {
     const url = `https://news.google.com/rss/search?q=${encodeURIComponent(keyword)}&hl=ko&gl=KR&ceid=KR:ko`;
     const r = await fetch(url);
     const xml = await r.text();
+    const { XMLParser } = require("fast-xml-parser");
     const parser = new XMLParser({ ignoreAttributes: false });
     const json = parser.parse(xml);
     let items = json?.rss?.channel?.item || [];
@@ -254,6 +259,7 @@ async function fetchNews(keyword) {
         return !isNaN(d.getTime()) && d >= sevenDaysAgo;
       });
 
+    const { TfIdf } = require("natural");
     const tfidf = new TfIdf();
     items.forEach(a => tfidf.addDocument(a.title + " " + a.description));
 
@@ -271,12 +277,11 @@ async function fetchNews(keyword) {
   } catch(e) { console.error(e); return []; }
 }
 
-// ===================== 이메일 발송 함수 =====================
+// 이메일 발송 함수
 async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) {
   if (!user.emailrecive) return;
   let body = "";
 
-  // 뉴스
   if (user.news && newsItems.length > 0) {
     body += "<h3>뉴스 알림</h3>";
     body += newsItems.map(n => `
@@ -290,7 +295,6 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
     body += `<p>관련 뉴스 없음</p>`;
   }
 
-  // 일자리
   if (user.work && workItems.length > 0) {
     body += "<h3>일자리 알림</h3>";
     body += workItems.map(w => `
@@ -304,7 +308,6 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
     body += `<p>일자리 공고 없음</p>`;
   }
 
-  // LH 임대
   if (user.home && leaseItems.length > 0) {
     body += "<h3>집찾기 알림</h3>";
     body += leaseItems.map(i => `
@@ -319,21 +322,18 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
     body += `<p>LH 공고 없음</p>`;
   }
 
-  // 이메일 전송 시도
   try {
     await resend.emails.send({
-      from: "FoxMoon 알림센터 <onboarding@resend.dev>", // 기본 발신자
+      from: "FoxMoon 알림센터 <lcm12gcd12@gmail.com>", // ✅ verified sender
       to: user.email,
       subject: "🦊 FoxMoon 알림 도착!",
       html: body,
     });
-
     console.log(`✅ 메일 전송 성공 → ${user.email}`);
   } catch (err) {
     console.error(`❌ 메일 전송 실패 → ${user.email}`, err);
   }
 }
-
 
 // ================= GlobalData 갱신 크론 =================
 cron.schedule("0 3 * * *", async () => { // 매일 03:00
