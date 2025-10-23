@@ -212,19 +212,16 @@ app.get("/api/user-data", async (req, res) => {
     res.status(500).json({ leaseItems: [], newsItems: [], workItems: [] });
   }
 });
-// ===================== Nodemailer 설정 =====================
-// ===================== Nodemailer (Gmail) 설정 =====================
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
+// ===================== 이메일 발송 (Resend API, CommonJS) =====================
+const { Resend } = require("resend");
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ===================== HTML 태그 제거 =====================
-function stripHtml(html) { return html.replace(/<[^>]*>?/gm, ""); }
-// ===================== 뉴스 검색 =====================
+function stripHtml(html) {
+  return html.replace(/<[^>]*>?/gm, "");
+}
+
+// ===================== 뉴스 필터 블랙리스트 =====================
 const blacklist = [
   "연예","스타","방송","범죄","사건","사고","폭력","살인","강도","흉기",
   "스포츠","축구","야구","농구","사망","약물","불륜",
@@ -234,50 +231,7 @@ const blacklist = [
   "시댁","시동생","시부모"
 ];
 
-async function fetchNews(keyword) {
-  if (!keyword) return [];
-  try {
-    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(keyword)}&hl=ko&gl=KR&ceid=KR:ko`;
-    const r = await fetch(url);
-    const xml = await r.text();
-    const parser = new XMLParser({ ignoreAttributes: false });
-    const json = parser.parse(xml);
-    let items = json?.rss?.channel?.item || [];
-    const today = new Date();
-    const sevenDaysAgo = new Date(today); sevenDaysAgo.setDate(today.getDate() - 7);
-
-    items = (Array.isArray(items) ? items : [items])
-      .map(item => ({
-        title: item.title || "",
-        link: item.link || "",
-        pubDate: item.pubDate || "",
-        source: item.source?.["#text"] || "",
-        description: stripHtml(item.description || "")
-      }))
-      .filter(a => { 
-        const d = new Date(a.pubDate);
-        return !isNaN(d.getTime()) && d >= sevenDaysAgo;
-      });
-
-    const tfidf = new TfIdf();
-    items.forEach(a => tfidf.addDocument(a.title + " " + a.description));
-
-    items = items.map((a, idx) => {
-      let score = 0;
-      keyword.split(" ").forEach(tok => score += tfidf.tfidf(tok, idx));
-      if (!score || isNaN(score)) score = 0.0001;
-      const titleText = a.title.toLowerCase(), descText = a.description.toLowerCase();
-      blacklist.forEach(w => { if(titleText.includes(w.toLowerCase()) || descText.includes(w.toLowerCase())) score *= 0.2; });
-      return { ...a, score };
-    });
-
-    items.sort((a,b) => b.score - a.score);
-    return items.slice(0,3);
-  } catch(e) { console.error(e); return []; }
-}
-// ===================== LH API 조회 =====================
-
-// ---------------- 이메일 발송 ----------------
+// ===================== 이메일 발송 함수 =====================
 async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) {
   if (!user.emailrecive) return;
   let body = "";
@@ -325,25 +279,20 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
     body += `<p>LH 공고 없음</p>`;
   }
 
-  const mailOptions = {
-    from: `"알림 서비스" <${process.env.EMAIL_USER}>`, // Gmail 계정 사용
-    to: user.email,
-    subject: "오늘의 맞춤 알림 🦊",
-    html: body,
-  };
-
+  // 이메일 전송 시도
   try {
-    await transporter.sendMail(mailOptions);
+    await resend.emails.send({
+      from: "FoxMoon 알림센터 <onboarding@resend.dev>", // 기본 발신자
+      to: user.email,
+      subject: "🦊 FoxMoon 알림 도착!",
+      html: body,
+    });
+
     console.log(`✅ 메일 전송 성공 → ${user.email}`);
   } catch (err) {
     console.error(`❌ 메일 전송 실패 → ${user.email}`, err);
   }
 }
-
-
-
-
-
 
 
 // ================= GlobalData 갱신 크론 =================
