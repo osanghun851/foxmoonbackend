@@ -212,9 +212,7 @@ app.get("/api/user-data", async (req, res) => {
     res.status(500).json({ leaseItems: [], newsItems: [], workItems: [] });
   }
 });
-// ===================== 이메일 발송 (Resend API, CommonJS) =====================
-const Resend = require("resend").Resend;
-const resend = new Resend(process.env.RESEND_API_KEY);
+
 
 // Render IPv6 환경에서 fetch 오류 방지
 global.fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
@@ -278,10 +276,14 @@ async function fetchNews(keyword) {
 }
 
 // 이메일 발송 함수
+// ===================== 외부 이메일 API (Vercel) 호출 =====================
 async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) {
   if (!user.emailrecive) return;
+
+  // 1️⃣ HTML 본문 구성
   let body = "";
 
+  // 뉴스
   if (user.news && newsItems.length > 0) {
     body += "<h3>뉴스 알림</h3>";
     body += newsItems.map(n => `
@@ -295,6 +297,7 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
     body += `<p>관련 뉴스 없음</p>`;
   }
 
+  // 일자리
   if (user.work && workItems.length > 0) {
     body += "<h3>일자리 알림</h3>";
     body += workItems.map(w => `
@@ -308,6 +311,7 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
     body += `<p>일자리 공고 없음</p>`;
   }
 
+  // LH 임대
   if (user.home && leaseItems.length > 0) {
     body += "<h3>집찾기 알림</h3>";
     body += leaseItems.map(i => `
@@ -322,19 +326,28 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
     body += `<p>LH 공고 없음</p>`;
   }
 
+  // 2️⃣ Vercel 메일 서버 호출
   try {
-    await resend.emails.send({
-      from: "FoxMoon 알림센터 <lcm12gcd12@gmail.com>", // ✅ verified sender
-      to: user.email,
-      subject: "🦊 FoxMoon 알림 도착!",
-      html: body,
+    const response = await fetch("https://foxmoon.vercel.app/api/sendEmail", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: user.email,
+        subject: "🦊 FoxMoon 알림 도착!",
+        html: body,
+      }),
     });
-    console.log(`✅ 메일 전송 성공 → ${user.email}`);
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`메일 서버 응답 오류: ${err}`);
+    }
+
+    console.log(`✅ 메일 전송 요청 성공 → ${user.email}`);
   } catch (err) {
-    console.error(`❌ 메일 전송 실패 → ${user.email}`, err);
+    console.error(`❌ Vercel 메일 API 호출 실패 → ${user.email}`, err);
   }
 }
-
 // ================= GlobalData 갱신 크론 =================
 cron.schedule("0 3 * * *", async () => { // 매일 03:00
   console.log("⏰ [03:00] Global refresh start", new Date());
