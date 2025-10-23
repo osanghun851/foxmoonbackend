@@ -38,10 +38,10 @@ mongoose.connect(process.env.MONGO_URI, {
 
 // 미들웨어
 app.use(cors({
-  origin: [
+  origin: 
     
     "https://foxmoon.vercel.app"
-  ],
+  ,
   credentials: true
 }));
 app.use(bodyParser.json());
@@ -51,6 +51,11 @@ app.use(session({
   secret: process.env.SESSION_SECRET || "foxmoon_secret",
   resave: false,
   saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGO_URI,
+    collectionName: "sessions", // 세션 저장할 컬렉션명
+  }),
+
   cookie: {
     maxAge: 60 * 60 * 1000,
     httpOnly: true,
