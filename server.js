@@ -213,12 +213,15 @@ app.get("/api/user-data", async (req, res) => {
   }
 });
 // ===================== Nodemailer 설정 =====================
+// ===================== Nodemailer (Gmail) 설정 =====================
 const transporter = nodemailer.createTransport({
-  host: process.env.SES_HOST,
-  port: Number(process.env.SES_PORT),
-  secure: false,
-  auth: { user: process.env.SES_USER, pass: process.env.SES_PASS }
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
 });
+
 // ===================== HTML 태그 제거 =====================
 function stripHtml(html) { return html.replace(/<[^>]*>?/gm, ""); }
 // ===================== 뉴스 검색 =====================
@@ -279,8 +282,6 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
   if (!user.emailrecive) return;
   let body = "";
 
-  
-
   // 뉴스
   if (user.news && newsItems.length > 0) {
     body += "<h3>뉴스 알림</h3>";
@@ -291,10 +292,11 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
         <a href="${n.link}" target="_blank">보기</a>
       </div><hr>
     `).join("");
-  }else {
+  } else {
     body += `<p>관련 뉴스 없음</p>`;
   }
-  //취업
+
+  // 일자리
   if (user.work && workItems.length > 0) {
     body += "<h3>일자리 알림</h3>";
     body += workItems.map(w => `
@@ -304,9 +306,10 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
         <a href="${w.link}" target="_blank">채용사이트</a>
       </div><hr>
     `).join("");
-  }else {
+  } else {
     body += `<p>일자리 공고 없음</p>`;
   }
+
   // LH 임대
   if (user.home && leaseItems.length > 0) {
     body += "<h3>집찾기 알림</h3>";
@@ -321,11 +324,12 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
   } else {
     body += `<p>LH 공고 없음</p>`;
   }
+
   const mailOptions = {
-    from: `"알림" <${process.env.SES_VERIFIED_EMAIL}>`,
+    from: `"알림 서비스" <${process.env.EMAIL_USER}>`, // Gmail 계정 사용
     to: user.email,
-    subject: "알림 정보",
-    html: body
+    subject: "오늘의 맞춤 알림 🦊",
+    html: body,
   };
 
   try {
@@ -335,6 +339,7 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
     console.error(`❌ 메일 전송 실패 → ${user.email}`, err);
   }
 }
+
 
 
 
@@ -469,7 +474,7 @@ async function refreshGlobalData() {
 }
 
 // 서버 시작 시 한 번 실행
-refreshGlobalData();
+//refreshGlobalData();
 
 
 cron.schedule("0 3 * * *", refreshGlobalData);
