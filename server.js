@@ -1,3 +1,4 @@
+const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
 dotenv.config();
 const express = require("express");
@@ -31,6 +32,7 @@ const typeOrder = ["07","08","09","10","11","13","17"];
 const UserDataCache = require("./models/UserDataCache");
 const { fetchAllLH, fetchAllWorknet } = require("./functions/globalFetchers");
 const GlobalData = require("./models/GlobalData");
+
 
 // ===================== MongoDB 연결 =====================
 
