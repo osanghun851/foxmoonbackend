@@ -399,11 +399,11 @@ cron.schedule("0 3 * * *", async () => { // 매일 03:00
 });
 
 // ---------------- 설정 저장 ----------------
-app.post("/api/goosettings", async (req, res) => {
+app.post("/api/goosettings", authMiddleware, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.user.userId; // ✅ JWT에서 userId 복호화
     if (!userId) {
-      console.warn("⚠️ 세션에 userId 없음");
+      console.warn("⚠️ JWT에 userId 없음");
       return res.status(401).json({ error: "Unauthorized" });
     }
 
@@ -425,24 +425,23 @@ app.post("/api/goosettings", async (req, res) => {
 
     // 3️⃣ 캐시용 데이터 준비
     console.log("📝 캐시/이메일 처리 시작");
-    console.log("→ setting.home:", setting.home);
-    console.log("→ setting.news:", setting.news, ", newskeyword:", setting.newskeyword);
-    console.log("→ setting.work:", setting.work);
-
     const leaseItems = setting.home ? selectLeaseFromGlobal(global.lh, setting.region) : [];
-    const newsItems  = (setting.news && setting.newskeyword) ? await fetchNews(setting.newskeyword) : [];
-    const workItems  = setting.work ? selectWorknetFromGlobal(global.worknet, setting.workEdu, setting.workCo) : [];
+    const newsItems = (setting.news && setting.newskeyword)
+      ? await fetchNews(setting.newskeyword)
+      : [];
+    const workItems = setting.work
+      ? selectWorknetFromGlobal(global.worknet, setting.workEdu, setting.workCo)
+      : [];
 
     // 4️⃣ UserDataCache 갱신
     try {
-      console.log("💾 캐시 갱신 시도");
       await UserDataCache.deleteOne({ userId });
       await new UserDataCache({
         userId,
         leaseItems,
         newsItems,
         workItems,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       }).save();
       console.log(`💾 UserDataCache 갱신 완료 → userId: ${userId}`);
     } catch (cacheErr) {
@@ -451,16 +450,16 @@ app.post("/api/goosettings", async (req, res) => {
 
     // 5️⃣ 이메일 발송
     try {
-      if (setting.userId) {
-        console.log("✉️ 이메일 발송 시도 → setting.userId:", setting.userId);
-        if (setting.userId.email) {
-          await sendEmail({ ...setting.toObject(), ...setting.userId.toObject() }, leaseItems, newsItems, workItems);
-          console.log(`📧 이메일 발송 완료 → ${setting.userId.email}`);
-        } else {
-          console.warn("⚠️ 이메일 정보 없음, 발송 건너뜀");
-        }
+      if (setting.userId?.email) {
+        await sendEmail(
+          { ...setting.toObject(), ...setting.userId.toObject() },
+          leaseItems,
+          newsItems,
+          workItems
+        );
+        console.log(`📧 이메일 발송 완료 → ${setting.userId.email}`);
       } else {
-        console.warn("⚠️ populate 실패: setting.userId가 null");
+        console.warn("⚠️ 이메일 정보 없음, 발송 건너뜀");
       }
     } catch (emailErr) {
       console.error("❌ 이메일 발송 실패:", emailErr);
