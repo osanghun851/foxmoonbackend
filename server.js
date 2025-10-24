@@ -497,7 +497,7 @@ async function refreshGlobalData() {
 }
 
 // 서버 시작 시 한 번 실행
-refreshGlobalData();
+//refreshGlobalData();
 
 
 cron.schedule("0 3 * * *", refreshGlobalData);
