@@ -84,12 +84,21 @@ function authMiddleware(req, res, next) {
 }
 // ================= 회원가입 / 로그인 =================
 app.post("/register", async (req, res) => {
-  const { username, pw, Rname, address, birth, email } = req.body;
   try {
+    // 과거 클라이언트 호환: pw 또는 password 둘 다 허용
+    const { username, Rname, address, birth, email } = req.body;
+    const password = req.body.password ?? req.body.pw;
+
+    if (!username || !password) {
+      return res.status(400).json({ error: "username과 password가 필요합니다." });
+    }
+
     const exists = await User.findOne({ username });
     if (exists) return res.status(400).json({ error: "이미 존재하는 사용자명입니다." });
-    const hashedPassword = await bcrypt.hash(pw, 10);
+
+    const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = await User.create({ username, password: hashedPassword, Rname, address, birth, email });
+
     res.json({ message: "회원가입 성공", user: newUser.username });
   } catch (err) {
     res.status(400).json({ error: "회원가입 실패: " + err.message });
@@ -98,26 +107,32 @@ app.post("/register", async (req, res) => {
 
 
 app.post("/login", async (req, res) => {
-  const { username, password } = req.body;
-  const user = await User.findOne({ username });
-  if (!user) return res.status(400).json({ error: "사용자를 찾을 수 없음" });
-  const isPasswordValid = await bcrypt.compare(password, user.password);
-  if (!isPasswordValid) return res.status(400).json({ error: "비밀번호 오류" });
+  try {
+    const { username } = req.body;
+    const password = req.body.password ?? req.body.pw; // ← 둘 다 허용
 
-  // JWT 토큰 발급
-  const token = jwt.sign(
-    { userId: user._id, username: user.username },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
+    if (!username || !password) {
+      return res.status(400).json({ error: "username과 password가 필요합니다." });
+    }
 
-  res.json({
-    message: "로그인 성공",
-    token,
-    username: user.username
-  });
+    const user = await User.findOne({ username });
+    if (!user) return res.status(400).json({ error: "사용자를 찾을 수 없음" });
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) return res.status(400).json({ error: "비밀번호 오류" });
+
+    const token = jwt.sign(
+      { userId: user._id, username: user.username },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({ message: "로그인 성공", token, username: user.username });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "로그인 처리 중 오류" });
+  }
 });
-
 app.post("/logout", (req, res) => {
   // 토큰 기반 로그아웃은 서버에서 할 게 없음
   res.json({ message: "로그아웃 완료 (토큰은 클라이언트에서 삭제)" });
