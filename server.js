@@ -46,28 +46,13 @@ mongoose.connect(process.env.MONGO_URI, {
 
 // 미들웨어
 app.use(cors({
-  origin: 
-    
-    "https://foxmoon.vercel.app"
-  ,
-  credentials: true
+  origin: "https://foxmoon.vercel.app",
+  credentials: true,
 }));
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
-app.use(session({
-  secret: process.env.SESSION_SECRET || "foxmoon_secret",
-  resave: false,
-  saveUninitialized: false,
 
-
-  cookie: {
-    maxAge: 60 * 60 * 1000,
-    httpOnly: true,
-    sameSite: "none",         
-    secure: true, 
-  },
-}));
 app.set('trust proxy', 1);
 // 라우터 연결
 app.use("/api", purchaseRouter);
@@ -77,7 +62,24 @@ app.use("/api/settings", userSettingRouter);
 app.use(friendsRouter);
 app.use(foxhomeRouter);
 app.use(auth);
+// ====================================================
+// 🔑 JWT 인증 미들웨어
+// ====================================================
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "토큰이 없습니다." });
+  }
 
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "토큰이 유효하지 않습니다." });
+  }
+}
 // ================= 회원가입 / 로그인 =================
 app.post("/register", async (req, res) => {
   const { username, pw, Rname, address, birth, email } = req.body;
@@ -92,27 +94,39 @@ app.post("/register", async (req, res) => {
   }
 });
 
+
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
   const user = await User.findOne({ username });
   if (!user) return res.status(400).json({ error: "사용자를 찾을 수 없음" });
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) return res.status(400).json({ error: "비밀번호 오류" });
-  req.session.userId = user._id;
-  req.session.username = user.username;
-  res.json({ message: "로그인 성공", username: user.username });
+
+  // JWT 토큰 발급
+  const token = jwt.sign(
+    { userId: user._id, username: user.username },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  res.json({
+    message: "로그인 성공",
+    token,
+    username: user.username
+  });
 });
 
 app.post("/logout", (req, res) => {
-  req.session.destroy();
-  res.json({ message: "로그아웃 완료" });
+  // 토큰 기반 로그아웃은 서버에서 할 게 없음
+  res.json({ message: "로그아웃 완료 (토큰은 클라이언트에서 삭제)" });
 });
 
-app.get("/profile", (req, res) => {
-  if (req.session.userId) res.json({ username: req.session.username });
-  else res.status(401).json({ error: "로그인 필요" });
-});
 
+app.get("/profile", authMiddleware, async (req, res) => {
+  const user = await User.findById(req.user.userId);
+  if (!user) return res.status(404).json({ error: "사용자 없음" });
+  res.json({ username: user.username, email: user.email });
+});
 
 
 // --- 네이버 지역검색 API ---
@@ -174,32 +188,23 @@ app.post('/api/gpt-comment', async (req, res) => {
     res.status(500).json({ message: "GPT 요청 실패" });
   }
 });
-// 일기 제출 시 코인 지급
-app.post("/api/scoreup", async (req, res) => {
-  const userId = req.session.userId;
-  if (!userId) return res.status(401).json({ error: "로그인 필요" });
-
+// 일기 제출 시 코인 지급(이거해)
+app.post("/api/scoreup", authMiddleware, async (req, res) => {
   try {
-    // 코인 10 증가
     const updatedUser = await User.findByIdAndUpdate(
-      userId,
+      req.user.userId,
       { $inc: { coin: 10 } },
       { new: true }
     );
-
     res.json({ message: "코인 지급 완료", coin: updatedUser.coin });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: "코인 지급 실패" });
   }
 });
 //============================================기러기알림
-app.get("/api/user-data", async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: "로그인 필요" });
-
+app.get("/api/user-data", authMiddleware, async (req, res) => {
   try {
-    // UserDataCache에서 바로 가져오기
-    const cache = await UserDataCache.findOne({ userId: req.session.userId });
+    const cache = await UserDataCache.findOne({ userId: req.user.userId });
     if (!cache) return res.json({ leaseItems: [], newsItems: [], workItems: [] });
 
     res.json({
