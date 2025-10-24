@@ -355,7 +355,7 @@ async function sendEmail(user, leaseItems = [], newsItems = [], workItems = []) 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         to: user.email,
-        subject: "🦊 FoxMoon 알림 도착!",
+        subject: "🦊 기러기 알림 도착",
         html: body,
       }),
     });
